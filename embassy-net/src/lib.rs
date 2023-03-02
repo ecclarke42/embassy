@@ -9,6 +9,7 @@
 pub(crate) mod fmt;
 
 pub use embassy_net_driver as driver;
+use smoltcp::wire::DhcpOption;
 
 mod device;
 #[cfg(feature = "dns")]
@@ -77,7 +78,7 @@ pub struct StaticConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DhcpConfig {
+pub struct DhcpConfig<'a> {
     pub max_lease_duration: Option<Duration>,
     pub retry_config: RetryConfig,
     /// Ignore NAKs.
@@ -86,9 +87,11 @@ pub struct DhcpConfig {
     pub server_port: u16,
     /// Client port config
     pub client_port: u16,
+    /// DHCP Options
+    pub outgoing_options: &'a [DhcpOption<'a>],
 }
 
-impl Default for DhcpConfig {
+impl Default for DhcpConfig<'_> {
     fn default() -> Self {
         Self {
             max_lease_duration: Default::default(),
@@ -96,14 +99,15 @@ impl Default for DhcpConfig {
             ignore_naks: Default::default(),
             server_port: smoltcp::wire::DHCP_SERVER_PORT,
             client_port: smoltcp::wire::DHCP_CLIENT_PORT,
+            outgoing_options: &[],
         }
     }
 }
 
-pub enum Config {
+pub enum Config<'a> {
     Static(StaticConfig),
     #[cfg(feature = "dhcpv4")]
-    Dhcp(DhcpConfig),
+    Dhcp(DhcpConfig<'a>),
 }
 
 pub struct Stack<D: Driver> {
@@ -133,7 +137,7 @@ pub(crate) struct SocketStack {
 impl<D: Driver + 'static> Stack<D> {
     pub fn new<const SOCK: usize>(
         mut device: D,
-        config: Config,
+        config: Config<'static>,
         resources: &'static mut StackResources<SOCK>,
         random_seed: u64,
     ) -> Self {
@@ -353,11 +357,12 @@ impl<D: Driver + 'static> Inner<D> {
         self.config = Some(config)
     }
 
-    fn apply_dhcp_config(&self, socket: &mut smoltcp::socket::dhcpv4::Socket, config: DhcpConfig) {
+    fn apply_dhcp_config<'a>(&self, socket: &mut smoltcp::socket::dhcpv4::Socket<'a>, config: DhcpConfig<'a>) {
         socket.set_ignore_naks(config.ignore_naks);
         socket.set_max_lease_duration(config.max_lease_duration);
         socket.set_ports(config.server_port, config.client_port);
         socket.set_retry_config(config.retry_config);
+        socket.set_outgoing_options(config.outgoing_options);
     }
 
     #[allow(unused)] // used only with dhcp
